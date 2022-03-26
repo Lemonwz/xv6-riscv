@@ -3,7 +3,7 @@
 #include "user/user.h"
 
 int
-main() {
+main(){
     int p[2];
     if(pipe(p) < 0){
         exit(1);
