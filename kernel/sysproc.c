@@ -81,6 +81,35 @@ int
 sys_pgaccess(void)
 {
   // lab pgtbl: your code here.
+  int len;
+  pte_t *pte;
+  uint64 base, addr;
+  uint64 bitmask = 0;
+  struct proc *p = myproc();
+
+  if(argaddr(0, &base) < 0)
+    return -1;
+  if(argint(1, &len) < 0)
+    return -1;
+  if(len > 64){
+    panic("only 64 pages can be scanned in one call");
+  }
+  if(argaddr(2, &addr) < 0)
+    return -1;
+  for(int i=0; i<len; i++){
+    pte = walk(p->pagetable, base, 0);
+    if(*pte & PTE_A){
+      bitmask |= (1<<i);
+      *pte &= (~PTE_A);
+    }
+    base += PGSIZE;
+    if(base >= MAXVA){
+      break;
+    }
+  }
+  if(copyout(p->pagetable, addr, (char *)&bitmask, sizeof(bitmask)) < 0){
+    return -1;
+  }
   return 0;
 }
 #endif
