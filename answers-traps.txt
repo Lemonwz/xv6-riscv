@@ -1,0 +1,37 @@
+Q1: Which registers contain arguments to functions?
+    For example, which register holds 13 in main's call to printf? 
+
+A1: a0-a7 寄存器用于函数调用可能会用到的参数, printf调用中寄存器a0存放格式"%d %d\n", a1存放参数12, a2存放参数13
+
+Q2: Where is the call to function f in the assembly code for main? Where is the call to g? 
+
+A2: g(x)被内联到了f(x)中, f(x)被内联到了main()中
+
+Q3: At what address is the function printf located?
+
+A3: 0x0000000000000630
+
+Q4: What value is in the register ra just after the jalr to printf in main?
+
+A4: 0x38 下一条指令的地址
+
+Q5: Run the following code.
+
+	unsigned int i = 0x00646c72;
+	printf("H%x Wo%s", 57616, &i);
+      
+What is the output?
+
+If the RISC-V were instead big-endian what would you set i to in order to yield the same output?
+Would you need to change 57616 to a different value?
+
+输出为 HE110 World
+%x表示以16进制形式输出整数: 57616 -> 1110000100010000 -> E110
+ASCII对照表中 72->r 6c->l 64->d, 小端序低位字节存入低地址, 因此输出顺序为rld
+如果切换为大端序, 则i应该为0x726c6400, 57616无需改变
+
+Q6: In the following code, what is going to be printed after 'y='? (note: the answer is not a specific value.) Why does this happen?
+
+	printf("x=%d y=%d", 3);
+      
+A6: 输出为 x=3 y=1 缺少第二个参数, 输出寄存器a2中当前存放的值
