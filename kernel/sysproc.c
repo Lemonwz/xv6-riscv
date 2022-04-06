@@ -122,10 +122,6 @@ sys_sigreturn(void)
   struct proc *p;
 
   p = myproc();
-  printf("epc: %d\nhatrid: %d\nra: %d\nsp: %d\ns0: %d\ns1: %d\na0: %d\na1: %d\na2: %d\n",
-    p->trapframe->epc, p->trapframe->kernel_hartid, p->trapframe->ra, p->trapframe->sp, p->trapframe->s0, p->trapframe->s1, p->trapframe->a0, p->trapframe->a1, p->trapframe->a2);
-  printf("epc: %d\nhatrid: %d\nra: %d\nsp: %d\ns0: %d\ns1: %d\na0: %d\na1: %d\na2: %d\n",
-    p->prevtrapframe->epc, p->prevtrapframe->kernel_hartid, p->prevtrapframe->ra, p->prevtrapframe->sp, p->prevtrapframe->s0, p->prevtrapframe->s1, p->prevtrapframe->a0, p->prevtrapframe->a1, p->prevtrapframe->a2);
   *p->trapframe = *p->prevtrapframe;
   p->ticks = 0;
   return 0;
