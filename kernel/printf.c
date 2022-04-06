@@ -141,11 +141,8 @@ backtrace(void)
   uint64 *ra, *prevfp;
 
   fp = r_fp();
-  // if(fp > PGROUNDUP(fp)){
-  //   panic("frame point out of stack page");
-  // }
   printf("backtrace:\n");
-  while(fp > PGROUNDDOWN(fp)){
+  while(fp < PGROUNDUP(fp)){
     ra = (uint64 *)(fp-8);
     prevfp = (uint64 *)(fp-16);
     printf("%p\n", *ra);
