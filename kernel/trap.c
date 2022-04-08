@@ -50,7 +50,8 @@ usertrap(void)
   // save user program counter.
   p->trapframe->epc = r_sepc();
   
-  if(r_scause() == 8){
+  uint64 cause = r_scause();
+  if(cause == 8){
     // system call
 
     if(p->killed)
@@ -65,6 +66,14 @@ usertrap(void)
     intr_on();
 
     syscall();
+  } else if(cause == 13 || cause == 15){
+    uint64 va = r_stval();
+    if(checkcow(p->pagetable, va) == 0){
+      if(copyonwrite(p->pagetable, va) != 0)
+        p->killed = 1;
+    } else {
+      p->killed = 1;
+    }
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {

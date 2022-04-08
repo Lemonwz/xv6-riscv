@@ -178,9 +178,14 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
       panic("uvmunmap: not mapped");
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
+    uint64 pa = PTE2PA(*pte);
+    pa = PGROUNDDOWN(pa);
     if(do_free){
-      uint64 pa = PTE2PA(*pte);
       kfree((void*)pa);
+    } else {
+      if(kgetref((void*)pa) > 1){
+        kderef((void*)pa);
+      }
     }
     *pte = 0;
   }
@@ -303,22 +308,19 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
+    *pte |= PTE_COW; // set copy-on-write bit
+    *pte &= ~PTE_W;  // clear writable bit
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
+    if(mappages(new, i, PGSIZE, pa, flags) != 0)
       goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
-      goto err;
-    }
+    kref((void*)pa);
   }
   return 0;
 
@@ -347,6 +349,12 @@ int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
   uint64 n, va0, pa0;
+  
+  if(checkcow(pagetable, dstva) == 0){
+    if(copyonwrite(pagetable, dstva) != 0){
+      return -1;
+    }
+  }
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
@@ -431,4 +439,61 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+// check whether virtual address is mapped to a cow page
+// return 0 if it is a cow page, or return -1
+int
+checkcow(pagetable_t pagetable, uint64 va)
+{
+  pte_t *pte;
+  uint64 pa;
+
+  if(va >= MAXVA)
+    return -1;
+  if((pte = walk(pagetable, va, 0)) == 0)
+    return -1;
+  if(!(*pte & PTE_V) || !(*pte & PTE_U))
+    return -1;
+  pa = PTE2PA(*pte);
+  if(kgetref((void*)pa) < 1)
+    return -1;
+  if(!(*pte & PTE_COW))
+    return -1;
+
+  return 0;
+}
+
+// handle page fault on cow page
+// allocate a new page with and copy the old page to the new page
+// then install the new page in the PTE with PTE_W set and PTE_COW clear.
+// return 0 on success, -1 on error
+int
+copyonwrite(pagetable_t pagetable, uint64 va)
+{
+  uint64 oldpa;
+
+  pte_t *oldpte = walk(pagetable, va, 0);
+  oldpa = PTE2PA(*oldpte);
+  oldpa = PGROUNDDOWN(oldpa);
+  // duplicate copy-on-write request
+  if(kgetref((void*)oldpa) == 1){
+    *oldpte |= PTE_W;
+    *oldpte &= ~PTE_COW;
+  } else {
+    void *newpa = kalloc();
+    if(newpa == 0){
+      return -1;
+    } else {
+      memmove(newpa, (void*)oldpa, PGSIZE);
+      *oldpte |= PTE_W;
+      *oldpte &= ~PTE_COW;
+      uint64 flags = PTE_FLAGS(*oldpte);
+      pte_t newpte = PA2PTE(newpa);
+      *oldpte = newpte | flags;
+      kderef((void*)oldpa);
+      // kfree((void*)oldpa);
+    }
+  }
+  return 0;
 }

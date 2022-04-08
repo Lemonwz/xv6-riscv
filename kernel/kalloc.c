@@ -23,10 +23,21 @@ struct {
   struct run *freelist;
 } kmem;
 
+struct pgref
+{
+  struct spinlock lock;
+  int count;
+};
+
+struct pgref pgrefs[(PHYSTOP-KERNBASE)/PGSIZE];
+
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  for(int i=0; i<(PHYSTOP-KERNBASE)/PGSIZE; ++i){
+    initlock(&pgrefs[i].lock, "pgref");
+  }
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -47,19 +58,26 @@ void
 kfree(void *pa)
 {
   struct run *r;
+  struct pgref *pr;
 
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
-  // Fill with junk to catch dangling refs.
-  memset(pa, 1, PGSIZE);
-
-  r = (struct run*)pa;
-
-  acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  release(&kmem.lock);
+  pr = &pgrefs[((uint64)pa-KERNBASE)/PGSIZE];
+  acquire(&pr->lock);
+  if(pr->count >= 1){
+    pr->count -= 1;
+  }
+  if(pr->count == 0){
+    // Fill with junk to catch dangling refs.
+    memset(pa, 1, PGSIZE);
+    r = (struct run*)pa;
+    acquire(&kmem.lock);
+    r->next = kmem.freelist;
+    kmem.freelist = r;
+    release(&kmem.lock);
+  }
+  release(&pr->lock);
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -72,11 +90,59 @@ kalloc(void)
 
   acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
+  if(r){
+    struct pgref *pr;
+    pr = &pgrefs[((uint64)r-KERNBASE)/PGSIZE];
+    acquire(&pr->lock);
+    if(pr->count != 0)
+      panic("kalloc");
+    pr->count = 1;
+    release(&pr->lock);
     kmem.freelist = r->next;
+  }
   release(&kmem.lock);
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
+}
+
+void
+kref(void *pa)
+{
+  struct pgref *pr;
+  pr = &pgrefs[((uint64)pa-KERNBASE)/PGSIZE];
+  
+  acquire(&pr->lock);
+  if(pr->count == 0)
+    panic("kref: not alloc");
+  pr->count += 1;
+  release(&pr->lock);
+}
+
+void
+kderef(void *pa)
+{ 
+  struct pgref *pr;
+  pr = &pgrefs[((uint64)pa-KERNBASE)/PGSIZE];
+
+  acquire(&pr->lock);
+  if(pr->count == 0){
+    panic("kderef: should free");
+  }
+  pr->count -= 1;
+  if(pr->count == 0){
+    release(&pr->lock);
+    kfree(pa);
+    return;
+  }
+  release(&pr->lock);
+}
+
+uint64
+kgetref(void *pa)
+{
+  struct pgref *pr;
+  pr = &pgrefs[((uint64)pa-KERNBASE)/PGSIZE];
+  return pr->count;
 }
