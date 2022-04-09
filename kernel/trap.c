@@ -66,7 +66,7 @@ usertrap(void)
     intr_on();
 
     syscall();
-  } else if(cause == 13 || cause == 15){
+  } else if(cause == 15){
     uint64 va = r_stval();
     if(checkcow(p->pagetable, va) == 0){
       if(copyonwrite(p->pagetable, va) != 0)
