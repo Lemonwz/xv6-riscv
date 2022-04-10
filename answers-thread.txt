@@ -1,0 +1,6 @@
+Q: Why are there missing keys with 2 threads, but not with 1 thread?
+   Identify a sequence of events with 2 threads that can lead to a key being missing.
+
+A: 进程中的多个线程是共享内存的, 两个线程对同一个bucket执行insert操作, 在线程A获取表头head后, 完成插入前, 线程B完成了
+   对bucket的insert(在head之前插入了一个新的entry), 那么此时A获取到的表头head就应该是过时的, 而线程A插入entry
+   并设置entry->next = head, 从而导致线程B插入的entry丢失. 其实就是并行所导致的竞争问题
