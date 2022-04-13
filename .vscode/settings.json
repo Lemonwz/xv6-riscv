@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "net.h": "c",
+        "user.h": "c",
+        "stat.h": "c",
+        "types.h": "c"
+    }
+}

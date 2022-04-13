@@ -19,7 +19,8 @@ static struct mbuf *rx_mbufs[RX_RING_SIZE];
 // remember where the e1000's registers live.
 static volatile uint32 *regs;
 
-struct spinlock e1000_lock;
+struct spinlock e1000_lock_trans;
+struct spinlock e1000_lock_recv;
 
 // called by pci_init().
 // xregs is the memory address at which the
@@ -29,7 +30,8 @@ e1000_init(uint32 *xregs)
 {
   int i;
 
-  initlock(&e1000_lock, "e1000");
+  initlock(&e1000_lock_trans, "e1000_trans");
+  initlock(&e1000_lock_recv, "e1000_recv");
 
   regs = xregs;
 
@@ -102,10 +104,29 @@ e1000_transmit(struct mbuf *m)
   // the TX descriptor ring so that the e1000 sends it. Stash
   // a pointer so that it can be freed after sending.
   //
-  
+  acquire(&e1000_lock_trans);
+  uint32 idx = regs[E1000_TDT];
+  struct tx_desc *desc = &tx_ring[idx];
+  struct mbuf *prembuf = tx_mbufs[idx];
+  if(desc->status != E1000_TXD_STAT_DD){
+    release(&e1000_lock_trans);
+    return -1;
+  }
+  if(prembuf){
+    mbuffree(prembuf);
+  }
+  tx_mbufs[idx] = m;
+  memset(desc, 0, sizeof(desc));
+  desc->addr = (uint64)m->head;
+  desc->length = m->len;
+  desc->cmd = E1000_TXD_CMD_RS | E1000_TXD_CMD_EOP;
+  regs[E1000_TDT] = (idx+1) % TX_RING_SIZE;
+  release(&e1000_lock_trans);
   return 0;
 }
 
+// 收到packet的EOP位均为1，即一个desc的mbuf对应一个完整的packet
+// 不需要遍历desc来确定一个packet的完整长度
 static void
 e1000_recv(void)
 {
@@ -115,6 +136,25 @@ e1000_recv(void)
   // Check for packets that have arrived from the e1000
   // Create and deliver an mbuf for each packet (using net_rx()).
   //
+  acquire(&e1000_lock_recv);
+  while(1){
+    uint32 idx = (regs[E1000_RDT]+1) % RX_RING_SIZE;
+    struct rx_desc *desc = &rx_ring[idx];
+    struct mbuf *m = rx_mbufs[idx];
+    if(!(desc->status & E1000_RXD_STAT_DD)){
+      release(&e1000_lock_recv);
+      return;
+    }
+    m->len = desc->length;
+    net_rx(m);
+    rx_mbufs[idx] = mbufalloc(0);
+    if(!rx_mbufs[idx]){
+      panic("e1000_recv");
+    }
+    desc->addr = (uint64)rx_mbufs[idx]->head;
+    desc->status = 0;
+    regs[E1000_RDT] = idx;
+  }
 }
 
 void
