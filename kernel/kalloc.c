@@ -38,7 +38,6 @@ kinit()
   }
   // give all free memory to the CPU running freerange. 
   freerange(end, (void*)PHYSTOP);
-  printf("page num: %d\n", (PHYSTOP-(uint64)end)/PGSIZE);
   kmems->stealist = 0;
 }
 
