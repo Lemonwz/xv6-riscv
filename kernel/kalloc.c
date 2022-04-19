@@ -21,6 +21,7 @@ struct run {
 struct kmem{
   struct spinlock lock;
   struct run *freelist;
+  struct run *stealist;
 };
 
 struct kmem kmems[NCPU];
@@ -37,6 +38,8 @@ kinit()
   }
   // give all free memory to the CPU running freerange. 
   freerange(end, (void*)PHYSTOP);
+  printf("page num: %d\n", (PHYSTOP-(uint64)end)/PGSIZE);
+  kmems->stealist = 0;
 }
 
 void
@@ -85,20 +88,35 @@ kalloc(void)
   int id = cpuid();
   acquire(&kmems[id].lock);
   if(!kmems[id].freelist){
-    int stealnum = 32;
+    // Release currently held cpu lock first
+    // Steal 64 free pages from other cpu
+    // And put it into current cpu`s stealist
+    // No need to hold a lock for stealist, because it is exclusive to current cpu
+    // With push_off(no process switch), it is safe to modify stealist
+    int stealnum = 64;
+    release(&kmems[id].lock);
     for(int bid=0; bid<NCPU; bid++){
       if(bid == id) continue;
       acquire(&kmems[bid].lock);
       struct run *rr = kmems[bid].freelist;
       while(rr && stealnum){
         kmems[bid].freelist = rr->next;
-        rr->next = kmems[id].freelist;
-        kmems[id].freelist = rr;
+        rr->next = kmems[id].stealist;
+        kmems[id].stealist = rr;
         rr = kmems[bid].freelist;
         stealnum--;
       }
       release(&kmems[bid].lock);
       if(stealnum == 0) break;
+    }
+    // Put free pages in stealist into current cpu`s freelist
+    r = kmems[id].stealist;
+    acquire(&kmems[id].lock);
+    while(r != 0){
+      kmems[id].stealist = r->next;
+      r->next = kmems[id].freelist;
+      kmems[id].freelist = r;
+      r = kmems[id].stealist;
     }
   }
   
@@ -106,9 +124,9 @@ kalloc(void)
   if(r)
     kmems[id].freelist = r->next;
   release(&kmems[id].lock);
+  pop_off();
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
-  pop_off();
   return (void*)r;
 }
