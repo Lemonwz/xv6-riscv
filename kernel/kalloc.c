@@ -35,10 +35,10 @@ kinit()
     char name[20];
     snprintf(name, sizeof(name), "kmem%d", i);
     initlock(&kmems[i].lock, name);
+    kmems[i].stealist = 0;
   }
   // give all free memory to the CPU running freerange. 
   freerange(end, (void*)PHYSTOP);
-  kmems->stealist = 0;
 }
 
 void
