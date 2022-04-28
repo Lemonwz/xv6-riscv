@@ -6,6 +6,12 @@
 #include "defs.h"
 #include "fs.h"
 
+#include "fcntl.h"
+#include "spinlock.h"
+#include "sleeplock.h"
+#include "file.h"
+#include "proc.h"
+
 /*
  * the kernel's page table.
  */
@@ -179,6 +185,32 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     if(do_free){
+      uint64 pa = PTE2PA(*pte);
+      kfree((void*)pa);
+    }
+    *pte = 0;
+  }
+}
+
+void
+uvmaunmap(pagetable_t pagetable, uint64 va, uint64 npages, struct vma *v, int do_free)
+{
+  uint64 a;
+  pte_t *pte;
+
+  if((va % PGSIZE) != 0)
+    panic("uvmaunmap: not aligned");
+  
+  if(v->flags & MAP_SHARED){
+    filewrite(v->f, va, npages*PGSIZE);
+  }
+  
+  for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
+    if((pte = walk(pagetable, a, 0)) == 0)
+      panic("uvmunmap: walk");
+    if(PTE_FLAGS(*pte) == PTE_V)
+      panic("uvmunmap: not a leaf");
+    if((*pte & PTE_V && do_free)){
       uint64 pa = PTE2PA(*pte);
       kfree((void*)pa);
     }

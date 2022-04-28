@@ -12,6 +12,8 @@
 #include "file.h"
 #include "stat.h"
 #include "proc.h"
+#include "fcntl.h"
+#include "memlayout.h"
 
 struct devsw devsw[NDEV];
 struct {
@@ -180,3 +182,56 @@ filewrite(struct file *f, uint64 addr, int n)
   return ret;
 }
 
+struct vma *
+findvma(uint64 va)
+{
+  struct vma *v = 0;
+  struct proc *p = myproc();
+
+  if(va >= TRAPFRAME)
+    return v;
+  for(int i=0; i<VMASIZE; i++){
+    if(p->vmas[i].valid){
+      if(va >= p->vmas[i].sva && va < p->vmas[i].sva + p->vmas[i].len){
+        v = &p->vmas[i];
+        break;
+      }
+    }
+  }
+  return v;
+}
+
+int
+filemap(struct vma *v, uint64 va)
+{
+  struct proc *p = myproc();
+  // allocate a page of physical memory
+  void *pa = kalloc();
+  if(pa == 0)
+    return -1;
+  // kalloc fill allocated page with 5, but mmaptest want 0
+  memset(pa, 0, PGSIZE);
+
+  // read 4096 bytes of the relevant file into that page
+  begin_op();
+  ilock(v->f->ip);
+  readi(v->f->ip, 0, (uint64)pa, PGROUNDDOWN(va-v->sva) + v->offset, PGSIZE);
+  iunlock(v->f->ip);
+  end_op();
+
+  // map the page into user address space
+  int flags = PTE_U;
+  if(v->prot & PROT_READ)
+    flags |= PTE_R;
+  if(v->prot & PROT_WRITE)
+    flags |= PTE_W;
+  if(v->prot & PROT_EXEC)
+    flags |= PTE_X;
+  
+  if(mappages(p->pagetable, va, PGSIZE, (uint64)pa, flags) < 0){
+    kfree(pa);
+    return -1;
+  }
+  
+  return 0;
+}

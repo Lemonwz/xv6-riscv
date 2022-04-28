@@ -15,6 +15,7 @@
 #include "sleeplock.h"
 #include "file.h"
 #include "fcntl.h"
+#include "memlayout.h"
 
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
@@ -481,6 +482,120 @@ sys_pipe(void)
     fileclose(rf);
     fileclose(wf);
     return -1;
+  }
+  return 0;
+}
+
+uint64
+sys_mmap(void)
+{
+  int prot, flags, fd, len, offset;
+  uint64 va, end = TRAPFRAME;
+  struct file *f;
+  struct proc *p = myproc();
+
+  if(argaddr(0, &va) < 0)
+    return -1;
+  if(argint(1, &len) < 0)
+    return -1;
+  if(argint(2, &prot) < 0)
+    return -1;
+  if(argint(3, &flags) < 0)
+    return -1;
+  if(argfd(4, &fd, &f) < 0)
+    return -1;
+  if(argint(5, &offset) < 0)
+    return -1;
+  
+  // map unwritable file to writeable and write back modification
+  if(!f->writable && (prot & PROT_WRITE) && (flags & MAP_SHARED))
+    return -1;
+  // map unreadable file to readable
+  if(!f->readable && (prot & PROT_READ))
+    return -1;
+  // find an unused region in the process's address space
+  struct vma *v = 0;
+  for(int i=0; i<VMASIZE; i++){
+    struct vma *vv = &p->vmas[i];
+    if(!vv->valid){
+      v = vv;
+      break;
+    }
+    end = PGROUNDDOWN(vv->sva);
+  }
+  if(v == 0)
+    panic("mmap: out of vmas");
+
+  // add a VMA to the process's table of mapped regions
+  v->valid = 1;
+  v->sva = end - len;
+  v->len = len;
+  v->offset = offset;
+  v->prot = prot;
+  v->flags = flags;
+  v->f = f;
+
+  // increase the file's reference count so that
+  // the structure doesn't disappear when the file is closed
+  filedup(v->f);
+  return v->sva;
+}
+
+uint64
+sys_munmap(void)
+{
+  int len;
+  uint64 va;
+  struct proc *p = myproc();
+
+  if(argaddr(0, &va) < 0)
+    return -1;
+  if(va >= TRAPFRAME)
+    return -1;
+  if(argint(1, &len) < 0)
+    return -1;
+  
+  // find the VMA for the address range
+  struct vma *v = 0;
+  for(int i=0; i<VMASIZE; i++){
+    struct vma *vv = &p->vmas[i];
+    uint64 end = vv->sva + vv->len;
+    if(vv->valid){
+      // An munmap call might cover only a portion of an mmap-ed region
+      // but you can assume that it will either unmap at the start, or at the end
+      // or the whole region (but not punch a hole in the middle of a region).
+      // unmap at the start (inclue unmap the whole region)
+      if(va == vv->sva && va + len <= end){
+        v = vv;
+        break;
+      }
+      // unmap at the end
+      else if(va > vv->sva && va + len == end){
+        v = vv;
+        break;
+      }
+    }
+  }
+  if(v == 0)
+    return -1;
+  
+  // unmap the specified pages
+  if(va > v->sva)
+    va = PGROUNDUP(va);
+
+  uvmaunmap(p->pagetable, va, len/PGSIZE, v, 1);
+  // update VMA
+  // unmap at the start, update sva
+  if(va == v->sva){
+    v->sva = va + len;
+  }
+  v->len -= len;
+  // unmap the whole region
+  // decrement file ref count, free vma
+  if(v->len == 0){
+    fileclose(v->f);
+    memset(v, 0, sizeof(struct vma));
+    // v->valid = 0;
   }
   return 0;
 }

@@ -281,6 +281,16 @@ fork(void)
     return -1;
   }
 
+  // copy vmas to ensure child has the same mapped regions as parent
+  for(int i=0; i<VMASIZE; i++){
+    struct vma *v = &p->vmas[i];
+    // only copy valid vms and increment the reference count
+    if(v->valid){
+      np->vmas[i] = *v;
+      filedup(v->f);
+    }
+  }
+
   // Copy user memory from parent to child.
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
     freeproc(np);
@@ -344,6 +354,13 @@ exit(int status)
   if(p == initproc)
     panic("init exiting");
 
+  for(int i=0; i<VMASIZE; i++){
+    struct vma *v = &p->vmas[i];
+    if(v->valid)
+      uvmaunmap(p->pagetable, v->sva, v->len/PGSIZE, v, 0);
+    memset(v, 0, sizeof(struct vma));
+  }
+  
   // Close all open files.
   for(int fd = 0; fd < NOFILE; fd++){
     if(p->ofile[fd]){

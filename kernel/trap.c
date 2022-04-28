@@ -67,7 +67,20 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } else if(r_scause() == 13 || r_scause() == 15) {
+    uint64 va = r_stval();
+    struct vma *v = 0;
+
+    if((v = findvma(va)) == 0){
+      printf("usertrap(): no vma found for the given va %p\n", r_stval());
+      exit(-1);
+    }
+    if(filemap(v, va) < 0){
+      printf("usertrap(): fail to map file into user address region\n");
+      exit(-1);
+    }
+  }
+  else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
