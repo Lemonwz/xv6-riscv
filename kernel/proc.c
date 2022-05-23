@@ -357,7 +357,7 @@ exit(int status)
   for(int i=0; i<VMASIZE; i++){
     struct vma *v = &p->vmas[i];
     if(v->valid)
-      uvmaunmap(p->pagetable, v->sva, v->len/PGSIZE, v, 0);
+      uvmaunmap(p->pagetable, v->sva, v->len/PGSIZE, v, 1);
     memset(v, 0, sizeof(struct vma));
   }
   
